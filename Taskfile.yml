@@ -19,7 +19,6 @@ vars:
 tasks:
   default:
     cmds:
-      - task: validate
       - task: kind:create
       - task: kind:deploy
       - sleep 0.1 && {{.RED}} && {{.BOLD}} && {{.BG_B}} && echo -e "\nAwaiting for the backup deployment to be over..." && {{.RESET}}
@@ -30,7 +29,6 @@ tasks:
   deploy:
     dir: build/percona-xtradb-cluster-operator/deploy
     cmds:
-     # - kubectl create namespace pxc-operator
       - kubectl create namespace a
       - kubectl config set-context --current --namespace=a
       - kubectl apply -f ssl-secrets.yaml
@@ -69,6 +67,7 @@ tasks:
     dir: build/percona-xtradb-cluster-operator/deploy
     cmds:
       - kubectl ctx k3d-k3d-testing-1
+      - kubectl ctx kind-kind
       - kubectl delete namespace a
     ignore_error: true
 
@@ -84,17 +83,14 @@ tasks:
   revert:cluster2:
     dir: build/percona-xtradb-cluster-operator/deploy
     cmds:
-     # - kubectl create namespace pxc-operatork
       - kubectl ctx k3d-k3d-testing-2
       - kubectl delete namespace a
- #     - task: deploy:backup
     ignore_error: true
 
   revert:dual:
     dir: build/percona-xtradb-cluster-operator/deploy
     deps: [revert:cluster1, revert:cluster2]
     cmds:
-     # - kubectl create namespace pxc-operatork
       - echo "Deleting both clusters namespace A at the same time..."
     ignore_error: true
     silent: true
