@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aws-credentials-secret
+type: Opaque
+data:
+  AWS_ACCESS_KEY_ID: {YOUR_ACESS_KEY_ID}
+  AWS_SECRET_ACCESS_KEY: {YOUR_SECRET_ACCESS_KEY}

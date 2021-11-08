@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: percona-xtradb-cluster-operator
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: operator
+      app.kubernetes.io/instance: percona-xtradb-cluster-operator
+      app.kubernetes.io/name: percona-xtradb-cluster-operator
+      app.kubernetes.io/part-of: percona-xtradb-cluster-operator
+  template:
+    spec:
+      containers:
+      - command:
+        - percona-xtradb-cluster-operator
+        env:
+        - name: WATCH_NAMESPACE
+          value: ""
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        - name: OPERATOR_NAME
+          value: percona-xtradb-cluster-operator
+        image: perconalab/percona-xtradb-cluster-operator:main
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /metrics
+            port: metrics
+            scheme: HTTP
+        name: percona-xtradb-cluster-operator
+        ports:
+        - containerPort: 8080
+          name: metrics
+          protocol: TCP

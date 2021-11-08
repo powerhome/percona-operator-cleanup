@@ -1,0 +1,288 @@
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  BIN_DIR: '{{.PWD}}/build/bin'
+  PROJECT: controller
+  CYAN: tput setaf 6
+  RED: tput setaf 1
+  BG_B: tput setab 0
+  BOLD: tput bold
+  RESET: tput sgr0
+  OUTPUT_DIR: out
+  OUTPUT_TEST_DIR: "{{.OUTPUT_DIR}}/tests"
+  OUTPUT_BIN_DIR: "{{.OUTPUT_DIR}}/bin"
+  OUTPUT_DOCS_DIR: "{{.OUTPUT_DIR}}/docs"
+  VERSION: v0.1
+
+tasks:
+  default:
+    cmds:
+      - task: validate
+      - task: kind:create
+      - task: kind:deploy
+      - sleep 0.1 && {{.RED}} && {{.BOLD}} && {{.BG_B}} && echo -e "\nAwaiting for the backup deployment to be over..." && {{.RESET}}
+      - kubectl wait deploy/argocd-server --for condition=available --timeout=600s
+      - task: watch:operator
+    silent: true
+
+  deploy:
+    dir: build/percona-xtradb-cluster-operator/deploy
+    cmds:
+     # - kubectl create namespace pxc-operator
+      - kubectl create namespace a
+      - kubectl config set-context --current --namespace=a
+      - kubectl apply -f ssl-secrets.yaml
+      - kubectl apply -f secrets.yaml
+      - kubectl apply -f cw-rbac.yaml
+      - kubectl apply -f backup-s3.yaml
+      - kubectl apply -f cw-operator.yaml
+      - kubectl apply -f cw-bundle.yaml
+      - kubectl apply -f cr.yaml
+      - task: deploy:backup
+    ignore_error: true
+
+  validate:
+    preconditions:
+      - sh: "which kubeval"
+        msg: "Kubeval is not installed. Exiting..."
+      - sh: "which kubent"
+        msg: "Kubent is not installed. Exiting..."
+    vars:
+      DEPTH: 6
+    desc: Validates your Yaml objects in the repository using Kubeval
+    cmds:
+      - sleep 0.1 && {{.CYAN}} && {{.BOLD}} && {{.BG_B}} && echo -e "\nValidating Yaml files using Kubeval..." && {{.RESET}}
+      - sleep 0.1 && {{.CYAN}} && echo -e "\nOperator object files" && {{.RESET}}
+      - find . -maxdepth {{.DEPTH}} -name \*-operator.yaml -exec kubeval {} \;
+      - sleep 0.1 && {{.CYAN}} && echo -e "\nSecret object files" && {{.RESET}}
+      - find . -maxdepth {{.DEPTH}} -name \*-secret.yaml -exec kubeval {} \;
+      - sleep 0.1 && {{.CYAN}} && echo -e "\nClusterRole sobject files" && {{.RESET}}
+      - find . -maxdepth {{.DEPTH}} -name \*-rbac.yaml -exec kubeval {} \;
+      - cd manifests && kustomize build > ../result.yaml
+      - kubent -f result.yaml
+      - rm result.yaml
+    silent: true
+
+  revert:
+    dir: build/percona-xtradb-cluster-operator/deploy
+    cmds:
+      - kubectl ctx k3d-k3d-testing-1
+      - kubectl delete namespace a
+    ignore_error: true
+
+  revert:cluster1:
+    dir: build/percona-xtradb-cluster-operator/deploy
+    cmds:
+     # - kubectl create namespace pxc-operatork
+      - kubectl ctx k3d-k3d-testing-1
+      - kubectl delete namespace a
+ #     - task: deploy:backup
+    ignore_error: true
+
+  revert:cluster2:
+    dir: build/percona-xtradb-cluster-operator/deploy
+    cmds:
+     # - kubectl create namespace pxc-operatork
+      - kubectl ctx k3d-k3d-testing-2
+      - kubectl delete namespace a
+ #     - task: deploy:backup
+    ignore_error: true
+
+  revert:dual:
+    dir: build/percona-xtradb-cluster-operator/deploy
+    deps: [revert:cluster1, revert:cluster2]
+    cmds:
+     # - kubectl create namespace pxc-operatork
+      - echo "Deleting both clusters namespace A at the same time..."
+    ignore_error: true
+    silent: true
+
+  watch:operator:
+    cmds:
+      - stern -A percona
+
+  clean:
+    cmds:
+      - k3d cluster delete --config ./build/k3d-1.yaml
+      - k3d cluster delete --config ./build/k3d-2.yaml
+      - task: kind:destroy
+      - kind delete cluster
+    silent: true
+    ignore_error: true
+
+  k3d:reboot:
+    cmds:
+      - k3d cluster delete --config ./build/k3d-1.yaml
+      - k3d cluster create --config ./build/k3d-1.yaml
+      - sleep 10
+    silent: true
+    ignore_error: true
+
+  kind:create:
+    preconditions:
+      - sh: "which kind"
+        msg: "KinD is not installed. Please install it before proceeding."
+    cmds:
+      - kind delete cluster
+      - kind create cluster --config build/kind.yaml
+    silent: true
+    ignore_error: true
+
+  kind:destroy:
+    cmds:
+      - kind delete cluster --config build/kind.yaml
+    silent: true
+    ignore_error: true
+
+  kindr:create:
+    cmds:
+      - ctlptl delete -f ./build/kind.yaml
+      - ctlptl apply -f ./build/kind.yaml
+    silent: true
+    ignore_error: true
+  kindr:destroy:
+    cmds:
+      - ctlptl delete -f ./build/kind.yaml
+    silent: true
+    ignore_error: true
+
+  pull:cluster:
+    cmds:
+      - docker pull docker.io/percona/percona-xtradb-cluster:8.0.23-14.1
+      - docker tag docker.io/percona/percona-xtradb-cluster:8.0.23-14.1 localhost:5005/dbcluster
+      - docker push localhost:5005/dbcluster
+    silent: true
+    ignore_error: true
+
+  pull:pmm:
+    cmds:
+      - docker pull docker.io/percona/pmm-client:2.23.0
+      - docker tag docker.io/percona/pmm-client:2.23.0 localhost:5005/pmm
+      - docker push localhost:5005/pmm
+    silent: true
+    ignore_error: true
+
+  pull:main:
+    cmds:
+      - docker pull docker.io/percona/percona-xtradb-cluster-operator:1.10.0
+      - docker tag docker.io/percona/percona-xtradb-cluster-operator:1.10.0 localhost:5005/main
+      - docker push localhost:5005/main
+    silent: true
+    ignore_error: true
+
+  pull:proxy:
+    cmds:
+      - docker pull docker.io/percona/percona-xtradb-cluster-operator:1.10.0-haproxy
+      - docker tag docker.io/percona/percona-xtradb-cluster-operator:1.10.0-haproxy localhost:5005/proxy
+      - docker push localhost:5005/proxy
+    silent: true
+    ignore_error: true
+
+  pull:logs:
+    cmds:
+      - docker pull docker.io/percona/percona-xtradb-cluster-operator:1.10.0-logcollector
+      - docker tag docker.io/percona/percona-xtradb-cluster-operator:1.10.0-logcollector localhost:5005/logs
+      - docker push localhost:5005/logs
+    silent: true
+    ignore_error: true
+
+  kind:pull:
+    deps: [pull:cluster, pull:pmm, pull:logs, pull:proxy, pull:main]
+    cmds:
+      - docker pull docker.io/percona/percona-xtradb-cluster-operator:1.10.0-pxc8.0-backup
+      - docker tag docker.io/percona/percona-xtradb-cluster-operator:1.10.0-pxc8.0-backup localhost:5005/backup
+      - docker push localhost:5005/backup
+    silent: true
+    ignore_error: true
+
+  list:
+    dir: manifests
+    cmds:
+      - sleep 0.1 && {{.CYAN}} && {{.BG_B}} && echo -e "\nAll Percona related resources..." && {{.RESET}}
+      - kubectl get-all | grep "percona"
+    silent: true
+    ignore_error: true
+
+  list:backup:
+    dir: manifests
+    cmds:
+      - sleep 0.1 && {{.CYAN}} && {{.BG_B}} && echo -e "\nListing all backup" && {{.RED}} && echo -e "                   \e[1A\eAPODS" && {{.RESET}}
+      - kubectl get-all | grep "backup1"
+    silent: true
+    ignore_error: true
+
+  watch:backups:
+    cmds:
+      - watch -n 0.1 build/backups.sh
+
+  kind:deploy:
+    dir: manifests
+    cmds:
+      - kubectl ctx kind-testing-cluster
+      - kubectl ctx kind-kind
+      - kubectl create namespace a
+      - kubectl config set-context --current --namespace=a
+      - kubectl apply -k ./
+    silent: true
+    ignore_error: true
+
+  k3d:dual:
+    cmds:
+      - sleep 0.1 && {{.RED}} && {{.BOLD}} && {{.BG_B}} && echo -e "\nDeleting previous cluster 1..." && {{.RESET}}
+      - k3d cluster delete --config ./build/k3d-1.yaml
+      - sleep 0.1 && {{.RED}} && {{.BOLD}} && {{.BG_B}} && echo -e "\nDeleting previous cluster 2..." && {{.RESET}}
+      - k3d cluster delete --config ./build/k3d-2.yaml
+      - sleep 0.1 && {{.CYAN}} && {{.BOLD}} && {{.BG_B}} && echo -e "\nCreating cluster 1..." && {{.RESET}}
+      - k3d cluster create --config ./build/k3d-1.yaml
+      - sleep 0.1 && {{.CYAN}} && {{.BOLD}} && {{.BG_B}} && echo -e "\nCreating cluster 2..." && {{.RESET}}
+      - k3d cluster create --config ./build/k3d-2.yaml
+      - sleep 10
+      - task: deploy:dual
+    silent: true
+    ignore_error: true
+
+  deploy:dual:
+    cmds:
+      - sleep 0.1 && {{.CYAN}} && {{.BOLD}} && {{.BG_B}} && echo -e "\nApplying operator to cluster 1 with adequate permissions..." && {{.RESET}}
+      - kubectl ctx k3d-k3d-testing-1
+      - kubectl create namespace a
+      - kubectl config set-context --current --namespace=a
+      - kubectl apply -f build/percona-xtradb-cluster-operator/deploy/crd.yaml
+      - kubectl apply -f build/percona-xtradb-cluster-operator/deploy/ssl-secrets.yaml
+      - kubectl apply -f build/percona-xtradb-cluster-operator/deploy/secrets.yaml
+      - kubectl apply -f build/percona-xtradb-cluster-operator/deploy/cw-rbac.yaml
+      - kubectl apply -f build/percona-xtradb-cluster-operator/deploy/backup-s3.yaml
+      - kubectl apply -f build/percona-xtradb-cluster-operator/deploy/cw-operator.yaml
+      - kubectl apply -f build/percona-xtradb-cluster-operator/deploy/cr.yaml
+      - task: deploy:backup
+      - sleep 0.1 && {{.CYAN}} && {{.BOLD}} && {{.BG_B}} && echo -e "\nApplying operator to cluster 2 with default standard permissions..." && {{.RESET}}
+      - kubectl ctx k3d-k3d-testing-2
+      - kubectl create namespace a
+      - kubectl config set-context --current --namespace=a
+      - kubectl apply -f build/percona-xtradb-cluster-operator/deploy/crd.yaml
+      - kubectl apply -f build/percona-xtradb-cluster-operator/deploy/ssl-secrets.yaml
+      - kubectl apply -f build/percona-xtradb-cluster-operator/deploy/secrets.yaml
+      - kubectl apply -f build/percona-xtradb-cluster-operator/deploy/rbac.yaml
+      - kubectl apply -f build/percona-xtradb-cluster-operator/deploy/backup-s3.yaml
+      - kubectl apply -f build/percona-xtradb-cluster-operator/deploy/operator.yaml
+      - kubectl apply -f build/percona-xtradb-cluster-operator/deploy/cr.yaml
+      - task: deploy:backup
+      - watch -n 0.1 build/wait.sh
+    ignore_error: true
+
+  show:
+    cmds:
+      -  kubectl get namespace a -o yaml
+
+  show:pods:
+    cmds:
+      - watch -n 0.1 build/wait.sh
+
+  kind:revert:
+    dir: manifests
+    cmds:
+      - kubectl config set-context --current --namespace=a
+      - kubectl delete namespace a
+    silent: true

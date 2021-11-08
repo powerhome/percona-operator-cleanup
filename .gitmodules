@@ -1,0 +1,3 @@
+[submodule "manifests/percona-xtradb-cluster-operator"]
+	path = manifests/base
+	url = git@github.com:percona/percona-xtradb-cluster-operator.git
